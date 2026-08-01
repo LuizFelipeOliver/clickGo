@@ -1,0 +1,16 @@
+# Binário compilado
+clickGo
+clickGo.exe
+
+# Diretório de build do GoReleaser
+dist/
+
+# Configurações locais / segredos
+.env
+.env.*
+*.local
+
+# Arquivos do editor
+.idea/
+.vscode/
+*.swp
