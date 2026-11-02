@@ -9,15 +9,15 @@ import (
 
 const (
 	configDir  = ".config/clickGo"
-	configFile = ".config.yaml"
+	configFile = "config.yaml"
 )
 
 type Config struct {
-	ClientID     string `yaml:"client_id"`
-	ClientSecret string `yaml:"client_secret"`
-	AccessToken  string `yaml:"access_token"`
-	TeamID       string `yaml:"team_id"`
-	TeamName     string `yaml:"team_name"`
+	Token    string `yaml:"token"`
+	UserID   int    `yaml:"user_id,omitempty"`
+	Username string `yaml:"username,omitempty"`
+	TeamID   string `yaml:"team_id,omitempty"`
+	TeamName string `yaml:"team_name,omitempty"`
 }
 
 func ConfigPath() (string, error) {
@@ -34,6 +34,7 @@ func LoadConfig() (*Config, error) {
 	if err != nil {
 		return cfg, err
 	}
+
 	data, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
 		return cfg, nil
@@ -41,6 +42,7 @@ func LoadConfig() (*Config, error) {
 	if err != nil {
 		return cfg, err
 	}
+
 	if err := yaml.Unmarshal(data, cfg); err != nil {
 		return cfg, err
 	}
@@ -63,5 +65,5 @@ func (c *Config) Save() error {
 }
 
 func (c *Config) HasToken() bool {
-	return c.AccessToken != ""
+	return c.Token != ""
 }

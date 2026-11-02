@@ -1,6 +1,3 @@
-/*
-clickGo é um CLI de integração com a API do ClickUp.
-*/
 package cmd
 
 import (
@@ -11,14 +8,11 @@ import (
 
 var rootCmd = &cobra.Command{
 	Use:   "clickGo",
-	Short: "CLI de integração com o ClickUp",
-	Long: `clickGo é um CLI para integrar com a API do ClickUp
-(tarefas, listas, espaços e time tracking) usando OAuth 2.0.`,
+	Short: "CLI para gerenciar o ClickUp pelo terminal",
 }
 
 func Execute() {
-	err := rootCmd.Execute()
-	if err != nil {
+	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
 	}
 }

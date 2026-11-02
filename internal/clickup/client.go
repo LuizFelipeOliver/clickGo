@@ -9,23 +9,20 @@ import (
 
 const baseURL = "https://api.clickup.com/api/v2"
 
-// Client encapsula os chamados à API do ClickUp.
 type Client struct {
 	http  *resty.Client
 	token string
 }
 
-// New cria um Client autenticado com o token informado.
-func New(token string) *Client {
+func NewClient(token string) *Client {
 	return &Client{
 		token: token,
 		http: resty.New().
 			SetBaseURL(baseURL).
-			SetHeader("Authorization", "Bearer "+token),
+			SetHeader("Authorization", token),
 	}
 }
 
-// do executa uma requisição, decodifica a resposta JSON em out e trata erros.
 func (c *Client) do(method, path string, query map[string]string, body, out any) error {
 	req := c.http.R()
 	if query != nil {
@@ -43,12 +40,11 @@ func (c *Client) do(method, path string, query map[string]string, body, out any)
 		return fmt.Errorf("%s %s: %w", method, path, err)
 	}
 	if resp.IsError() {
-		return fmt.Errorf("%s %s: HTTP %d: %s", method, path, resp.StatusCode(), string(resp.Body()))
+		return fmt.Errorf("erro na API (%d): %s", resp.StatusCode(), string(resp.Body()))
 	}
 	return nil
 }
 
-// User é a representação do usuário autenticado.
 type User struct {
 	ID       int    `json:"id"`
 	Username string `json:"username"`
@@ -56,11 +52,15 @@ type User struct {
 	Initials string `json:"initials"`
 }
 
-// GetUser retorna o usuário autenticado (GET /user).
+type userResponse struct {
+	User User `json:"user"`
+}
+
+// GetUser retorna os dados do usuário dono do token (GET /user).
 func (c *Client) GetUser() (*User, error) {
-	var out User
-	if err := c.do(http.MethodGet, "/user", nil, nil, &out); err != nil {
+	var res userResponse
+	if err := c.do(http.MethodGet, "/user", nil, nil, &res); err != nil {
 		return nil, err
 	}
-	return &out, nil
+	return &res.User, nil
 }

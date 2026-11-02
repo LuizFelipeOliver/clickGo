@@ -1,10 +1,10 @@
 package cmd
 
 import (
-	"crypto/rand"
-	"encoding/hex"
+	"bufio"
 	"fmt"
-	"time"
+	"os"
+	"strings"
 
 	"charm.land/lipgloss/v2"
 	"github.com/spf13/cobra"
@@ -13,78 +13,127 @@ import (
 )
 
 var (
-	authClientID     string
-	authClientSecret string
-	authPort         int
+	authTokenFlag     string
+	authNoBrowserFlag bool
 )
 
-func randomState() string {
-	b := make([]byte, 16)
-	if _, err := rand.Read(b); err != nil {
-		return fmt.Sprintf("%d", time.Now().UnixNano())
+// loadSession carrega a configuração, garante que UserID e TeamID estejam preenchidos e retorna o Client.
+func loadSession() (*clickup.Client, *clickup.Config, error) {
+	cfg, err := clickup.LoadConfig()
+	if err != nil {
+		return nil, nil, err
 	}
-	return hex.EncodeToString(b)
+	if !cfg.HasToken() {
+		return nil, nil, fmt.Errorf("não autenticado. Execute: clickGo auth")
+	}
+
+	client := clickup.NewClient(cfg.Token)
+	updated := false
+
+	if cfg.UserID == 0 {
+		user, err := client.GetUser()
+		if err != nil {
+			return nil, nil, fmt.Errorf("falha ao obter usuário: %w", err)
+		}
+		cfg.UserID = user.ID
+		cfg.Username = user.Username
+		updated = true
+	}
+
+	if cfg.TeamID == "" {
+		teams, err := client.GetTeams()
+		if err != nil {
+			return nil, nil, fmt.Errorf("falha ao obter workspaces: %w", err)
+		}
+		if len(teams) == 0 {
+			return nil, nil, fmt.Errorf("nenhum Workspace encontrado nesta conta do ClickUp")
+		}
+		cfg.TeamID = teams[0].ID
+		cfg.TeamName = teams[0].Name
+		updated = true
+	}
+
+	if updated {
+		_ = cfg.Save()
+	}
+
+	return client, cfg, nil
 }
 
 var authCmd = &cobra.Command{
 	Use:   "auth",
-	Short: "Autentica com o ClickUp via OAuth",
-	Long: `Autentica com o ClickUp via OAuth 2.0.
-
-Requer um app OAuth criado em ClickUp > Settings > Apps, com
-redirect_uri = http://localhost:8080/callback. Informe o client_id e o
-client_secret via flags ou via variáveis de ambiente:
-
-  CLICKUP_CLIENT_ID / CLICKUP_CLIENT_SECRET`,
+	Short: "Autentica na API do ClickUp usando seu Personal API Token",
+	Long: `Abre a página de configurações do ClickUp no navegador para você copiar
+seu Personal API Token (pk_...) e salvá-lo localmente na CLI.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		token := strings.TrimSpace(authTokenFlag)
+
+		if token == "" {
+			lipgloss.Println(titleStyle.Render("Autenticação no ClickUp"))
+			lipgloss.Println(mutedStyle.Render("Copie ou gere seu Personal API Token (pk_...) no link abaixo:"))
+			lipgloss.Println("")
+			lipgloss.Println(boxStyle.Render(clickup.TokenSettingsURL))
+			lipgloss.Println("")
+
+			if !authNoBrowserFlag {
+				if err := clickup.OpenBrowser(clickup.TokenSettingsURL); err != nil {
+					lipgloss.Println(mutedStyle.Render("Não foi possível abrir o navegador automaticamente. Abra o link acima manualmente."))
+				} else {
+					lipgloss.Println(mutedStyle.Render("Navegador aberto!"))
+				}
+			}
+
+			fmt.Print("\nCole seu token (pk_...): ")
+			reader := bufio.NewReader(os.Stdin)
+			input, err := reader.ReadString('\n')
+			if err != nil {
+				return fmt.Errorf("erro ao ler token: %w", err)
+			}
+			token = strings.TrimSpace(input)
+		}
+
+		if token == "" {
+			return fmt.Errorf("nenhum token informado")
+		}
+
+		lipgloss.Println(mutedStyle.Render("Validando token no ClickUp..."))
+		client := clickup.NewClient(token)
+		user, err := client.GetUser()
+		if err != nil {
+			return fmt.Errorf("token inválido ou falha ao conectar: %w", err)
+		}
+
+		teams, err := client.GetTeams()
+		if err != nil {
+			return fmt.Errorf("erro ao buscar workspaces: %w", err)
+		}
+
 		cfg, err := clickup.LoadConfig()
 		if err != nil {
 			return err
 		}
-
-		cfg.ClientID = firstNonEmpty(authClientID, getenv("CLICKUP_CLIENT_ID"), cfg.ClientID)
-		cfg.ClientSecret = firstNonEmpty(authClientSecret, getenv("CLICKUP_CLIENT_SECRET"), cfg.ClientSecret)
-
-		if cfg.ClientID == "" || cfg.ClientSecret == "" {
-			return fmt.Errorf("client_id e client_secret ausentes. Crie um app OAuth em ClickUp > Settings > Apps (redirect_uri http://localhost:%d/callback) e informe com --client-id / --client-secret ou as envs CLICKUP_CLIENT_ID / CLICKUP_CLIENT_SECRET", authPort)
+		cfg.Token = token
+		cfg.UserID = user.ID
+		cfg.Username = user.Username
+		if len(teams) > 0 {
+			cfg.TeamID = teams[0].ID
+			cfg.TeamName = teams[0].Name
 		}
-
-		state := randomState()
-		redirectURI := fmt.Sprintf("http://localhost:%d/callback", authPort)
-		authURL := clickup.AuthURL(cfg.ClientID, redirectURI, state)
-
-		lipgloss.Println(titleStyle.Render("Autorização do ClickUp"))
-		lipgloss.Println(mutedStyle.Render("Abra esta URL no navegador para autorizar:"))
-		lipgloss.Println("")
-		lipgloss.Println(boxStyle.Render(authURL))
-		lipgloss.Println("")
-		if err := clickup.OpenBrowser(authURL); err != nil {
-			lipgloss.Println(mutedStyle.Render("Não foi possível abrir o navegador automaticamente — cole a URL acima manualmente."))
-		}
-
-		code, err := clickup.ListenForCode(authPort, state)
-		if err != nil {
-			return err
-		}
-
-		tok, err := clickup.ExchangeToken(cfg.ClientID, cfg.ClientSecret, code, redirectURI)
-		if err != nil {
-			return err
-		}
-
-		cfg.AccessToken = tok.AccessToken
-		cfg.TeamID = tok.TeamID
-		cfg.TeamName = tok.TeamName
 
 		if err := cfg.Save(); err != nil {
-			return err
+			return fmt.Errorf("erro ao salvar configuração: %w", err)
 		}
 
-		lipgloss.Println(successStyle.Render("Autenticado!"))
-		if tok.TeamName != "" {
+		lipgloss.Println("")
+		lipgloss.Println(successStyle.Render("✓ Autenticado com sucesso!"))
+		lipgloss.Println(lipgloss.JoinHorizontal(lipgloss.Top,
+			keyStyle.Render("Usuário:"),
+			valStyle.Render(fmt.Sprintf("%s (%s)", user.Username, user.Email)),
+		))
+		if cfg.TeamName != "" {
 			lipgloss.Println(lipgloss.JoinHorizontal(lipgloss.Top,
 				keyStyle.Render("Workspace:"),
-				valStyle.Render(fmt.Sprintf("%s (%s)", tok.TeamName, tok.TeamID)),
+				valStyle.Render(fmt.Sprintf("%s (%s)", cfg.TeamName, cfg.TeamID)),
 			))
 		}
 		return nil
@@ -93,67 +142,52 @@ client_secret via flags ou via variáveis de ambiente:
 
 var authStatusCmd = &cobra.Command{
 	Use:   "status",
-	Short: "Mostra o estado da autenticação",
+	Short: "Verifica o status da autenticação atual",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cfg, err := clickup.LoadConfig()
+		client, cfg, err := loadSession()
 		if err != nil {
-			return err
+			lipgloss.Println(errStyle.Render("✗ " + err.Error()))
+			return nil
 		}
 
-		if cfg.HasToken() {
-			path, _ := clickup.ConfigPath()
-			lipgloss.Println(successStyle.Render("Autenticado"))
-			if cfg.TeamName != "" {
-				lipgloss.Println(lipgloss.JoinHorizontal(lipgloss.Top,
-					keyStyle.Render("Workspace:"),
-					valStyle.Render(fmt.Sprintf("%s (%s)", cfg.TeamName, cfg.TeamID)),
-				))
-			}
-			lipgloss.Println(mutedStyle.Render("Token salvo em: " + path))
-		} else {
-			lipgloss.Println(errStyle.Render("Não autenticado"))
-			lipgloss.Println(mutedStyle.Render("Rode: clickGo auth"))
-		}
-		return nil
-	},
-}
-
-var meCmd = &cobra.Command{
-	Use:   "me",
-	Short: "Exibe o usuário autenticado (testa o token)",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		cfg, err := clickup.LoadConfig()
-		if err != nil {
-			return err
-		}
-		if !cfg.HasToken() {
-			return fmt.Errorf("sem token. Rode: clickGo auth")
-		}
-
-		client := clickup.New(cfg.AccessToken)
 		user, err := client.GetUser()
 		if err != nil {
+			lipgloss.Println(errStyle.Render("✗ Token salvo é inválido ou expirou"))
 			return err
 		}
 
+		path, _ := clickup.ConfigPath()
 		rows := lipgloss.JoinVertical(lipgloss.Left,
-			titleStyle.Render("Usuário autenticado"),
+			successStyle.Render("✓ Autenticado"),
 			"",
 			lipgloss.JoinHorizontal(lipgloss.Top, keyStyle.Render("ID:"), valStyle.Render(fmt.Sprintf("%d", user.ID))),
 			lipgloss.JoinHorizontal(lipgloss.Top, keyStyle.Render("Usuário:"), valStyle.Render(user.Username)),
 			lipgloss.JoinHorizontal(lipgloss.Top, keyStyle.Render("E-mail:"), valStyle.Render(user.Email)),
-			lipgloss.JoinHorizontal(lipgloss.Top, keyStyle.Render("Iniciais:"), valStyle.Render(user.Initials)),
+			lipgloss.JoinHorizontal(lipgloss.Top, keyStyle.Render("Workspace:"), valStyle.Render(fmt.Sprintf("%s (%s)", cfg.TeamName, cfg.TeamID))),
+			lipgloss.JoinHorizontal(lipgloss.Top, keyStyle.Render("Config:"), mutedStyle.Render(path)),
 		)
 		lipgloss.Println(boxStyle.Render(rows))
 		return nil
 	},
 }
 
-func init() {
-	authCmd.Flags().StringVar(&authClientID, "client-id", "", "Client ID do app OAuth do ClickUp")
-	authCmd.Flags().StringVar(&authClientSecret, "client-secret", "", "Client Secret do app OAuth do ClickUp")
-	authCmd.Flags().IntVar(&authPort, "port", 8080, "Porta do servidor local de callback")
+var authLogoutCmd = &cobra.Command{
+	Use:   "logout",
+	Short: "Remove o token salvo localmente",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		cfg := &clickup.Config{}
+		if err := cfg.Save(); err != nil {
+			return err
+		}
+		lipgloss.Println(successStyle.Render("✓ Token removido com sucesso."))
+		return nil
+	},
+}
 
-	authCmd.AddCommand(authStatusCmd)
-	rootCmd.AddCommand(authCmd, meCmd)
+func init() {
+	authCmd.Flags().StringVarP(&authTokenFlag, "token", "t", "", "Personal API Token (pk_...)")
+	authCmd.Flags().BoolVar(&authNoBrowserFlag, "no-browser", false, "Não abrir o navegador automaticamente")
+
+	authCmd.AddCommand(authStatusCmd, authLogoutCmd)
+	rootCmd.AddCommand(authCmd)
 }

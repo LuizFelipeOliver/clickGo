@@ -1,6 +1,6 @@
 # clickGo
 
-CLI de integração com a API do [ClickUp](https://clickup.com) — tarefas, listas, espaços e time tracking, com autenticação OAuth 2.0 e interface estilizada no terminal.
+CLI de integração com a API do [ClickUp](https://clickup.com) — focada em visualizar rapidamente suas **tasks**, **subtasks** e **tasks relacionadas**, direto pelo terminal.
 
 ## Instalação
 
@@ -16,39 +16,43 @@ Opcional: mova para um diretório no `PATH` para usar de qualquer lugar:
 sudo mv clickGo /usr/local/bin/
 ```
 
-## Primeiro uso
+## Primeiro uso (Autenticação)
 
-1. Crie um app OAuth no ClickUp (avatar → **Settings** → **Apps** → *Create new app*) com redirect `http://localhost:8080/callback`. Só Workspace owners/admins conseguem criar.
-2. Autentique informando o `client_id` e o `client_secret`:
-
-```bash
-clickGo auth --client-id SEU_CLIENT_ID --client-secret SEU_CLIENT_SECRET
-```
-
-O comando abre o navegador, captura o token automaticamente e salva em `~/.config/clickGo/.config.yaml` (permissões `0600`).
-
-Alternativas para as credenciais: variáveis de ambiente `CLICKUP_CLIENT_ID` / `CLICKUP_CLIENT_SECRET`, ou informar uma única vez — ficam salvas no config.
-
-## Uso
+Execute o comando abaixo para abrir a página de configurações do ClickUp no navegador, copiar seu **Personal API Token (`pk_...`)** e colar no terminal:
 
 ```bash
-clickGo auth              # fluxo OAuth completo
-clickGo auth status       # mostra se já há token salvo
-clickGo me                # exibe o usuário autenticado (testa o token)
+clickGo auth
 ```
 
-## Autenticação
+O token e o seu Workspace principal ficam salvos em `~/.config/clickGo/config.yaml` (permissões `0600`).
 
-- **OAuth 2.0** (grant type *authorization code*): URL de autorização `https://app.clickup.com/api`, troca do code em `POST /api/v2/oauth/token`.
-- Token de acesso salvo localmente; usado no header `Authorization: Bearer <token>`.
-- Não expire (por padrão), mas você pode revogá-lo nas configurações do ClickUp.
+Alternativa: passar o token direto por flag:
+
+```bash
+clickGo auth --token pk_SEU_TOKEN
+```
+
+## Comandos
+
+```bash
+# Autenticação
+clickGo auth                  # abre o navegador e salva seu Personal API Token
+clickGo auth status           # verifica a conta e o Workspace autenticados
+clickGo auth logout           # remove o token salvo localmente
+
+# Tasks, Subtasks e Tasks Relacionadas
+clickGo tasks                 # lista todas as tasks e subtasks onde você é responsável
+clickGo tasks -a              # inclui tasks concluídas/fechadas
+clickGo tasks -s "progress"   # filtra por status
+clickGo tasks view <id>       # exibe detalhes da task, subtasks e tasks relacionadas
+clickGo tasks view <id> -o    # exibe os detalhes e abre a task no navegador
+```
 
 ## Desenvolvimento
 
 ```bash
 go build ./...   # compila
 go vet ./...     # análise estática
-go test ./...    # testes
 ```
 
 ## Licença
